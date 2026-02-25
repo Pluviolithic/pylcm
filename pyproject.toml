@@ -1,0 +1,43 @@
+[build-system]
+build-backend = "uv_build"
+requires = [ "uv-build>=0.10.7,<0.11" ]
+
+[project]
+name = "plcm"
+version = "0.0.0a1"
+description = "Alternative, pure-python implementation of lcm."
+readme = "README.md"
+license = "MIT"
+license-files = [ "LICEN[CS]E*" ]
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+    "typing-extensions>=4.15",
+]
+urls.Homepage = "https://github.com/Pluviolithic/pylcm"
+urls.Issues = "https://github.com/Pluviolithic/pylcm/issues"
+
+[dependency-groups]
+dev = [
+    "lcm==1.5.2",
+    "pyproject-fmt==2.16.2",
+    "pytest==9.0.2",
+    "pytest-cov==7",
+    "ruff==0.15.4",
+    "ty==0.0.19",
+    "uv==0.10.7",
+]
+
+[tool.ruff]
+preview = true
+lint.select = [ "ALL" ]
+lint.ignore = [ "COM812", "CPY", "D101", "EM", "TRY" ]
+lint.per-file-ignores."tests/**.py" = [ "D", "INP", "S" ]
+lint.pydocstyle.convention = "google"
