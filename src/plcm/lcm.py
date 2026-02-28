@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 
 from .connection import LcmConnection
 from .provider import LcmProvider
-from .tcpq_provider import LcmTcpqProvider
+from .providers import LcmTcpqProvider
 
 
 class Lcm:

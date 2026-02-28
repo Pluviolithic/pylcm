@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 from typing_extensions import Self, override
 
-from .connection import (
+from plcm.connection import (
     MAGIC_CLIENT,
     MAGIC_SERVER,
     PROTOCOL_VERSION,
@@ -19,8 +19,8 @@ from .connection import (
     LcmMessage,
     MessageType,
 )
-from .provider import LcmProvider
-from .subscription import LcmSubscription
+from plcm.provider import LcmProvider
+from plcm.subscription import LcmSubscription
 
 DEFAULT_URL = "tcpq://127.0.0.1:7700"
 
