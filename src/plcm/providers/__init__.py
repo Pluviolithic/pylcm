@@ -5,3 +5,8 @@ from .tcpq_provider import (
     LcmTcpqProvider as LcmTcpqProvider,
     LcmTcpqSubscription as LcmTcpqSubscription,
 )
+from .udpm_provider import (
+    LcmUdpmConnection as LcmUdpmConnection,
+    LcmUdpmProvider as LcmUdpmProvider,
+    LcmUdpmSubscription as LcmUdpmSubscription,
+)

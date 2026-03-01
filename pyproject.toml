@@ -38,7 +38,7 @@ dev = [
 [tool.ruff]
 preview = true
 lint.select = [ "ALL" ]
-lint.ignore = [ "COM812", "CPY", "D101", "EM", "TRY" ]
+lint.ignore = [ "COM812", "CPY", "D101", "EM", "FIX002", "TD002", "TRY" ]
 lint.per-file-ignores."tests/**.py" = [ "D", "INP", "S" ]
 lint.isort.combine-as-imports = true
 lint.pydocstyle.convention = "google"
