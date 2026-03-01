@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 
 from .connection import LcmConnection
 from .provider import LcmProvider
-from .providers import LcmTcpqProvider
+from .providers import LcmTcpqProvider, LcmUdpmProvider
 
 
 class Lcm:
@@ -13,6 +13,7 @@ class Lcm:
         self._providers = {}
 
         self.register_provider("tcpq", LcmTcpqProvider)
+        self.register_provider("udpm", LcmUdpmProvider)
 
     def connect(self, url: str) -> LcmConnection | None:
         """Connect to other client(s) using the specified provider.

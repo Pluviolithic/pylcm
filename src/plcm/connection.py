@@ -7,10 +7,6 @@ from enum import IntEnum
 
 from .subscription import LcmSubscription
 
-MAGIC_SERVER = b"\x28\x76\x17\xfa"
-MAGIC_CLIENT = b"\x28\x76\x17\xfb"
-PROTOCOL_VERSION = b"\x00\x00\x01\x00"
-
 
 class MessageType(IntEnum):
     """Indicators to notify a relay of what action is being taken."""

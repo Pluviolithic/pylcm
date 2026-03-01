@@ -11,18 +11,20 @@ from urllib.parse import urlparse
 
 from typing_extensions import Self, override
 
+from plcm import LcmConnection, LcmMessage
 from plcm.connection import (
-    MAGIC_CLIENT,
-    MAGIC_SERVER,
-    PROTOCOL_VERSION,
-    LcmConnection,
-    LcmMessage,
     MessageType,
 )
 from plcm.provider import LcmProvider
 from plcm.subscription import LcmSubscription
 
-DEFAULT_URL = "tcpq://127.0.0.1:7700"
+MAGIC_SERVER = b"\x28\x76\x17\xfa"
+MAGIC_CLIENT = b"\x28\x76\x17\xfb"
+PROTOCOL_VERSION = b"\x00\x00\x01\x00"
+
+PROVIDER_NAME = "tcpq"
+DEFAULT_ADDRESS = "127.0.0.1"
+DEFAULT_PORT = 7700
 
 
 class LcmTcpqSubscription(LcmSubscription):
@@ -83,12 +85,13 @@ class LcmTcpqConnection(LcmConnection):
     @override
     def __init__(self, url: str) -> None:
         parsed_url = urlparse(url)
-        parsed_default_url = urlparse(DEFAULT_URL)
 
-        address = parsed_url.hostname or parsed_default_url.hostname
-        port = parsed_url.port or parsed_default_url.port
+        address = (
+            parsed_url.hostname if parsed_url.hostname is not None else DEFAULT_ADDRESS
+        )
+        port = parsed_url.port if parsed_url.port is not None else DEFAULT_PORT
 
-        self._sock = create_connection((address, port))  # ty:ignore[invalid-argument-type]
+        self._sock = create_connection((address, port))
         self._perform_handshake()
 
         self._subscriptions = set()
@@ -101,55 +104,6 @@ class LcmTcpqConnection(LcmConnection):
             target=self._handle_subscriptions_thread
         )
         self._handle_subscriptions_thread_t.start()
-
-    def _perform_handshake(self) -> None:
-        try:
-            self._sock.sendall(MAGIC_CLIENT + PROTOCOL_VERSION)
-        except ConnectionError as exc:
-            raise RuntimeError("Lcm handshake failed.") from exc
-
-        if self._sock.recv(8, MSG_WAITALL) != MAGIC_SERVER + PROTOCOL_VERSION:
-            raise RuntimeError("Received invalid handshake values from relay.")
-
-    def _read_lcm_msg(self) -> LcmMessage:
-        _ = self._sock.recv(4, MSG_WAITALL)
-        channel_length = int.from_bytes(
-            self._sock.recv(4, MSG_WAITALL), "big", signed=False
-        )
-        channel = self._sock.recv(channel_length, MSG_WAITALL).decode("ascii")
-        data_length = int.from_bytes(self._sock.recv(4), "big", signed=False)
-        data = self._sock.recv(data_length, MSG_WAITALL)
-
-        return LcmMessage(channel=channel, data=data)
-
-    def _handle_subscriptions_thread(self) -> None:
-        while True:
-            try:
-                lcm_msg = self._read_lcm_msg()
-            except (ConnectionError, OSError):
-                break
-
-            with self._subscriptions_mutex:
-                for subscription in self._subscriptions:
-                    subscription.receive(lcm_msg.channel, lcm_msg.data)
-
-        self.disconnect()
-
-    def _unsubscribe_callback(self, subscription: LcmSubscription) -> None:
-        with self._subscriptions_mutex:
-            self._subscriptions.discard(subscription)
-
-        encoded_channel = subscription.get_channel().encode("ascii")
-
-        try:
-            self._sock.sendall(
-                MessageType.UNSUBSCRIBE.to_bytes(4, "big", signed=False)
-                + len(encoded_channel).to_bytes(4, "big", signed=False)
-                + encoded_channel
-            )
-        except (ConnectionError, OSError):
-            self.disconnect()
-            return
 
     @override
     def subscribe(
@@ -223,11 +177,60 @@ class LcmTcpqConnection(LcmConnection):
         except (ConnectionError, OSError):
             self.disconnect()
 
+    def _perform_handshake(self) -> None:
+        try:
+            self._sock.sendall(MAGIC_CLIENT + PROTOCOL_VERSION)
+        except ConnectionError as exc:
+            raise RuntimeError("Lcm handshake failed.") from exc
+
+        if self._sock.recv(8, MSG_WAITALL) != MAGIC_SERVER + PROTOCOL_VERSION:
+            raise RuntimeError("Received invalid handshake values from relay.")
+
+    def _read_lcm_msg(self) -> LcmMessage:
+        _ = self._sock.recv(4, MSG_WAITALL)
+        channel_length = int.from_bytes(
+            self._sock.recv(4, MSG_WAITALL), "big", signed=False
+        )
+        channel = self._sock.recv(channel_length, MSG_WAITALL).decode("ascii")
+        data_length = int.from_bytes(self._sock.recv(4), "big", signed=False)
+        data = self._sock.recv(data_length, MSG_WAITALL)
+
+        return LcmMessage(channel=channel, data=data)
+
+    def _handle_subscriptions_thread(self) -> None:
+        while self.is_connected():
+            try:
+                lcm_msg = self._read_lcm_msg()
+            except (ConnectionError, OSError):
+                break
+
+            with self._subscriptions_mutex:
+                for subscription in self._subscriptions:
+                    subscription.receive(lcm_msg.channel, lcm_msg.data)
+
+        self.disconnect()
+
+    def _unsubscribe_callback(self, subscription: LcmSubscription) -> None:
+        with self._subscriptions_mutex:
+            self._subscriptions.discard(subscription)
+
+        encoded_channel = subscription.get_channel().encode("ascii")
+
+        try:
+            self._sock.sendall(
+                MessageType.UNSUBSCRIBE.to_bytes(4, "big", signed=False)
+                + len(encoded_channel).to_bytes(4, "big", signed=False)
+                + encoded_channel
+            )
+        except (ConnectionError, OSError):
+            self.disconnect()
+            return
+
 
 class LcmTcpqProvider(LcmProvider):
     @override
     def __init__(self) -> None:
-        self._provider_name = urlparse(DEFAULT_URL).scheme
+        self._provider_name = PROVIDER_NAME
 
     @override
     def connect(self, url: str) -> LcmTcpqConnection:

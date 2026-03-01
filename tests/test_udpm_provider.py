@@ -1,4 +1,4 @@
-from random import randint
+from random import randbytes, randint
 from threading import Thread
 from time import sleep
 
@@ -7,7 +7,7 @@ from lcm import LCM
 
 from plcm import Lcm, LcmTcpqProvider
 
-TEST_URL = "tcpq://127.0.0.1:7700"
+TEST_URL = "udpm://239.255.76.67:7667?ttl=1"
 TEST_CHANNEL = "test_channel"
 
 
@@ -210,3 +210,68 @@ def test_invalid_usage() -> None:
 
     with pytest.raises(RuntimeError, match="Lcm not connected"):
         plc.publish(TEST_CHANNEL, b"\x00\x00\x00\x00")
+
+
+def test_pylcm_publish_large_payload() -> None:
+    lc = LCM(TEST_URL)
+    plc = Lcm().connect(TEST_URL)
+
+    assert plc is not None
+
+    large_payload = randbytes(1_000_000)
+    received_payload_a = None
+    received_payload_b = None
+
+    handle_thread_t = Thread(target=handle_thread, args=(lc,))
+
+    def callback_a(_channel: str, data: bytes) -> None:
+        nonlocal received_payload_a
+        received_payload_a = data
+
+    def callback_b(_channel: str, data: bytes) -> None:
+        nonlocal received_payload_b
+        received_payload_b = data
+
+    lc.subscribe(TEST_CHANNEL, callback_a)
+    plc.subscribe(TEST_CHANNEL, callback_b)
+    handle_thread_t.start()
+
+    # need a yield for lcm.LCM's subscribe to complete
+    sleep(0.1)
+
+    for _ in range(150):
+        plc.publish(TEST_CHANNEL, large_payload)
+
+    sleep(0.1)
+
+    plc.disconnect()
+
+    assert received_payload_a == large_payload
+    assert received_payload_b == large_payload
+
+
+def test_lcm_publish_large_payload() -> None:
+    lc = LCM(TEST_URL)
+    plc = Lcm().connect(TEST_URL)
+
+    assert plc is not None
+
+    large_payload = randbytes(1_000_000)
+    received_payload = None
+
+    def callback(_channel: str, data: bytes) -> None:
+        nonlocal received_payload
+        received_payload = data
+
+    plc.subscribe(TEST_CHANNEL, callback)
+
+    sleep(0.1)
+
+    for _ in range(100):
+        lc.publish(TEST_CHANNEL, large_payload)
+
+    sleep(0.1)
+
+    plc.disconnect()
+
+    assert received_payload == large_payload
