@@ -4,7 +4,7 @@ import re
 from collections.abc import Callable
 from contextlib import suppress
 from copy import copy
-from multiprocessing import Event, Lock
+from multiprocessing import Event, Lock, Queue
 from socket import MSG_WAITALL, SHUT_RDWR, create_connection
 from threading import Thread
 from urllib.parse import urlparse
@@ -33,18 +33,22 @@ class LcmTcpqSubscription(LcmSubscription):
         callback: Callable[[str, bytes], None],
         unsubscribe: Callable[[Self], None],
     ) -> None:
+        self._queue = Queue()
         self._channel = channel
         self._inactive = Event()
         self._callback = callback
         self._unsubscribe = unsubscribe
         self._regex = re.compile(channel)
 
+        self._process_queue_thread_t = Thread(target=self._process_queue_thread)
+        self._process_queue_thread_t.start()
+
     @override
     def receive(self, channel: str, data: bytes) -> None:
         if not self.is_active() or self._regex.match(channel) is None:
             return
 
-        self._callback(channel, data)
+        self._queue.put(LcmMessage(channel=channel, data=data))
 
     @override
     def is_active(self) -> bool:
@@ -61,6 +65,18 @@ class LcmTcpqSubscription(LcmSubscription):
 
         self._inactive.set()
         self._unsubscribe(self)
+        self._queue.put(None)
+
+        self._process_queue_thread_t.join()
+
+    def _process_queue_thread(self) -> None:
+        while self.is_active():
+            lcm_msg = self._queue.get()
+
+            if lcm_msg is None:
+                return
+
+            self._callback(lcm_msg.channel, lcm_msg.data)
 
 
 class LcmTcpqConnection(LcmConnection):
