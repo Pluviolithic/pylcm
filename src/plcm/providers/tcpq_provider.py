@@ -92,8 +92,10 @@ class LcmTcpqConnection(LcmConnection):
         self._perform_handshake()
 
         self._subscriptions = set()
-        self._subscriptions_mutex = Lock()
         self._disconnected = Event()
+
+        self._publish_mutex = Lock()
+        self._subscriptions_mutex = Lock()
 
         self._handle_subscriptions_thread_t = Thread(
             target=self._handle_subscriptions_thread
@@ -210,13 +212,14 @@ class LcmTcpqConnection(LcmConnection):
         encoded_channel = channel.encode("ascii")
 
         try:
-            self._sock.sendall(
-                MessageType.PUBLISH.to_bytes(4, "big", signed=False)
-                + len(encoded_channel).to_bytes(4, "big", signed=False)
-                + encoded_channel
-                + len(data).to_bytes(4, "big", signed=False)
-                + data
-            )
+            with self._publish_mutex:
+                self._sock.sendall(
+                    MessageType.PUBLISH.to_bytes(4, "big", signed=False)
+                    + len(encoded_channel).to_bytes(4, "big", signed=False)
+                    + encoded_channel
+                    + len(data).to_bytes(4, "big", signed=False)
+                    + data
+                )
         except (ConnectionError, OSError):
             self.disconnect()
 
