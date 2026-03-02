@@ -4,7 +4,7 @@ requires = [ "uv-build>=0.10.7,<0.11" ]
 
 [project]
 name = "plcm"
-version = "0.0.0a1"
+version = "0.0.0a3"
 description = "Alternative, pure-python implementation of lcm."
 readme = "README.md"
 license = "MIT"
