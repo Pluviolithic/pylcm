@@ -198,11 +198,15 @@ class LcmTcpqConnection(LcmConnection):
 
     def _read_lcm_msg(self) -> LcmMessage:
         _ = self._sock.recv(4, MSG_WAITALL)
+
         channel_length = int.from_bytes(
             self._sock.recv(4, MSG_WAITALL), "big", signed=False
         )
         channel = self._sock.recv(channel_length, MSG_WAITALL).decode("ascii")
-        data_length = int.from_bytes(self._sock.recv(4), "big", signed=False)
+
+        data_length = int.from_bytes(
+            self._sock.recv(4, MSG_WAITALL), "big", signed=False
+        )
         data = self._sock.recv(data_length, MSG_WAITALL)
 
         return LcmMessage(channel=channel, data=data)
