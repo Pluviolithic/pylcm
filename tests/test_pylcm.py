@@ -17,7 +17,11 @@ class BogusProvider(LcmProvider):
 def test_invalid_provider() -> None:
     plc = Lcm()
 
-    with pytest.raises(ValueError, match="No provider declared"):
+    # In Python3.10, 127.0.0.1 gets parsed as the `scheme` value,
+    # which is not the case in 3.11+. When Python3.10 reaches
+    # EOL, support can be dropped for this and the test made
+    # more precise / correct.
+    with pytest.raises((ValueError, RuntimeError), match="provider"):
         plc.connect("127.0.0.1:7700")
 
     with pytest.raises(RuntimeError, match="No bogus provider is registered"):
