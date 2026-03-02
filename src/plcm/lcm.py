@@ -15,7 +15,7 @@ class Lcm:
         self.register_provider("tcpq", LcmTcpqProvider)
         self.register_provider("udpm", LcmUdpmProvider)
 
-    def connect(self, url: str) -> LcmConnection | None:
+    def connect(self, url: str) -> LcmConnection:
         """Connect to other client(s) using the specified provider.
 
         Args:
@@ -28,8 +28,10 @@ class Lcm:
             The lcm connection instance, if successful.
 
         Raises:
-            ValueError: If provider not declared in passed url.
-            RuntimeError: If passed provider is not registered.
+            ValueError: If there is an issue with the provided url.
+            RuntimeError: If passed provider is not registered or
+                some other issue is encountered when initializing
+                the connection.
 
         """
         parsed_url = urlparse(url)
@@ -40,10 +42,7 @@ class Lcm:
         if parsed_url.scheme not in self._providers:
             raise RuntimeError(f"No {parsed_url.scheme} provider is registered.")
 
-        try:
-            return self._providers[parsed_url.scheme].connect(url)
-        except (RuntimeError, ValueError):
-            return None
+        return self._providers[parsed_url.scheme].connect(url)
 
     def register_provider(
         self,

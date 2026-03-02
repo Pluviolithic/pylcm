@@ -25,6 +25,7 @@ from socket import (
     socket,
 )
 from threading import Thread
+from types import TracebackType
 from urllib.parse import urlparse
 
 from typing_extensions import Self, override
@@ -155,6 +156,15 @@ class LcmUdpmConnection(LcmConnection):
             target=self._handle_subscriptions_thread
         )
         self._handle_subscriptions_thread_t.start()
+
+    @override
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.disconnect()
 
     @override
     def publish(self, channel: str, data: bytes) -> None:
