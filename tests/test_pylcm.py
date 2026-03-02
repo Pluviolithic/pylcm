@@ -28,7 +28,8 @@ def test_register_provider() -> None:
     plc = Lcm()
     plc.register_provider("bogus", BogusProvider)
 
-    assert plc.connect("bogus://") is None
+    with pytest.raises(RuntimeError, match="Bogus runtime error"):
+        plc.connect("bogus://")
 
     with pytest.raises(ValueError, match="Provider already exists"):
         plc.register_provider("bogus", BogusProvider)

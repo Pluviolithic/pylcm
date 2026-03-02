@@ -20,8 +20,6 @@ def test_pylcm_publish_lcm_subscribe() -> None:
     lc = LCM(TEST_URL)
     plc = Lcm().connect(TEST_URL)
 
-    assert plc is not None
-
     valid_sum = 0
     tested_sum = 0
 
@@ -40,7 +38,7 @@ def test_pylcm_publish_lcm_subscribe() -> None:
     for _ in range(100):
         random_int = randint(0, 1_000)
         valid_sum += random_int
-        plc.publish("test_channel", random_int.to_bytes(4, "little", signed=False))
+        plc.publish(TEST_CHANNEL, random_int.to_bytes(4, "little", signed=False))
 
     plc.disconnect()
     handle_thread_t.join()
@@ -51,8 +49,6 @@ def test_pylcm_publish_lcm_subscribe() -> None:
 def test_lcm_publish_pylcm_subscribe() -> None:
     lc = LCM(TEST_URL)
     plc = Lcm().connect(TEST_URL)
-
-    assert plc is not None
 
     valid_sum = 0
     tested_sum = 0
@@ -79,8 +75,6 @@ def test_lcm_publish_pylcm_subscribe() -> None:
 def test_pylcm_publish_pylcm_subscribe() -> None:
     plc = Lcm().connect(TEST_URL)
 
-    assert plc is not None
-
     valid_sum = 0
     tested_sum = 0
 
@@ -105,8 +99,6 @@ def test_pylcm_publish_pylcm_subscribe() -> None:
 
 def test_pylcm_unsubscribe() -> None:
     plc = Lcm().connect(TEST_URL)
-
-    assert plc is not None
 
     valid_sum = 0
     tested_sum = 0
@@ -146,8 +138,6 @@ def test_plcm_not_subscribed() -> None:
     lc = LCM(TEST_URL)
     plc = Lcm().connect(TEST_URL)
 
-    assert plc is not None
-
     valid_value = 0
     tested_value = valid_value
 
@@ -171,8 +161,6 @@ def test_plcm_not_subscribed() -> None:
 def test_get_channel() -> None:
     plc = Lcm().connect(TEST_URL)
 
-    assert plc is not None
-
     subscription = plc.subscribe(TEST_CHANNEL, print)
 
     assert subscription is not None
@@ -194,8 +182,6 @@ def test_invalid_usage() -> None:
     def callback(_channel: str, _data: bytes) -> None:
         return
 
-    assert plc is not None
-
     subscription = plc.subscribe(TEST_CHANNEL, callback)
 
     assert subscription is not None
@@ -210,3 +196,31 @@ def test_invalid_usage() -> None:
 
     with pytest.raises(RuntimeError, match="Lcm not connected"):
         plc.publish(TEST_CHANNEL, b"\x00\x00\x00\x00")
+
+
+def test_context_manager() -> None:
+    lc = LCM(TEST_URL)
+
+    valid_sum = 0
+    tested_sum = 0
+
+    with Lcm().connect(TEST_URL) as plc:
+
+        def callback(_channel: str, data: bytes) -> None:
+            nonlocal tested_sum
+            tested_sum += int.from_bytes(data, "little", signed=False)
+
+        plc.subscribe(TEST_CHANNEL, callback)
+
+        sleep(0.1)
+
+        for _ in range(100):
+            random_int = randint(0, 1_000)
+            valid_sum += random_int
+            lc.publish(TEST_CHANNEL, random_int.to_bytes(4, "little", signed=False))
+
+        sleep(0.1)
+
+    lc.publish(TEST_CHANNEL, b"\x05")
+
+    assert tested_sum == valid_sum

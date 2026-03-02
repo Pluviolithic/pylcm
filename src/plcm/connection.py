@@ -1,7 +1,8 @@
 """Definition of an lcm connection."""
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from enum import IntEnum
 
@@ -24,7 +25,7 @@ class LcmMessage:
     data: bytes
 
 
-class LcmConnection(ABC):
+class LcmConnection(AbstractContextManager):
     @abstractmethod
     def __init__(self, url: str) -> None:
         """An lcm connection.
