@@ -70,6 +70,7 @@ class LcmUdpmSubscription(LcmSubscription):
         self._regex = re.compile(channel)
 
         self._process_queue_thread_t = Thread(target=self._process_queue_thread)
+        self._process_queue_thread_t.daemon = True
         self._process_queue_thread_t.start()
 
     @override
@@ -155,6 +156,7 @@ class LcmUdpmConnection(LcmConnection):
         self._handle_subscriptions_thread_t = Thread(
             target=self._handle_subscriptions_thread
         )
+        self._handle_subscriptions_thread_t.daemon = True
         self._handle_subscriptions_thread_t.start()
 
     @override
