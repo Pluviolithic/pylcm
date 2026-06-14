@@ -3,11 +3,21 @@ import inspect
 import sys
 from argparse import ArgumentParser
 from dataclasses import dataclass
+from math import trunc
 from pathlib import Path
-from time import sleep
+from time import time_ns
 from typing import Any
 
+import pandas as pd
+
 from plcm import Lcm
+
+COLUMNS = ["Channel", "Received", "Rate (hz)", "Bandwidth (KB/s)"]
+
+try:
+    from nicegui import ui
+except ImportError:
+    raise RuntimeError("Optional ui dependencies not installed - ui will not run.")  # noqa: B904
 
 
 @dataclass
@@ -15,7 +25,17 @@ class NestedAttributes:
     attributes: list[tuple[str, Any]]
 
 
-_stored_fingerprints = {}
+@dataclass
+class ChannelData:
+    channel: str
+    received: int
+    initial_time: int
+    total_data_size: int
+    attributes: list[tuple[str, Any]]
+
+
+def truncate(value: float) -> float:
+    return trunc(value * 100) / 100
 
 
 def create_argparser() -> ArgumentParser:
@@ -46,71 +66,117 @@ def create_argparser() -> ArgumentParser:
     return argparser
 
 
-def expand_message(message: Any) -> list[tuple[str, Any]]:
-    attributes = inspect.getmembers(message, lambda a: not inspect.isroutine(a))
-    attributes = [
-        attribute for attribute in attributes if not attribute[0].startswith("_")
-    ]
+class UI:
+    def __init__(self) -> None:
+        self._latest_messages = {}
+        self._stored_fingerprints = {}
+        self._df = pd.DataFrame(columns=COLUMNS)
+        self._table = ui.table.from_pandas(self._df.reset_index(drop=True))
 
-    for idx, attribute in enumerate(attributes):
-        if hasattr(attribute[1], "_get_packed_fingerprint"):
-            attributes[idx] = (
-                attribute[0],
-                (
-                    attribute[1].__class__.__name__,
-                    NestedAttributes(expand_message(attribute[1])),
+        for idx in range(1, 4):
+            self._table.columns[idx]["sortable"] = True
+
+        arguments = create_argparser().parse_args()
+        self.store_fingerprint_mappings(arguments.generated_messages)
+
+        plc = Lcm().connect(arguments.lcm_url)
+        plc.subscribe(r".+", self.receive_message)
+
+    def expand_message(self, message: Any) -> list[tuple[str, Any]]:
+        attributes = inspect.getmembers(message, lambda a: not inspect.isroutine(a))
+        attributes = [
+            attribute for attribute in attributes if not attribute[0].startswith("_")
+        ]
+
+        for idx, attribute in enumerate(attributes):
+            if hasattr(attribute[1], "_get_packed_fingerprint"):
+                attributes[idx] = (
+                    attribute[0],
+                    (
+                        attribute[1].__class__.__name__,
+                        NestedAttributes(self.expand_message(attribute[1])),
+                    ),
+                )
+
+        return attributes
+
+    def receive_message(self, channel: str, data: bytes) -> None:
+        decode = self._stored_fingerprints.get(data[:8])
+
+        if decode is None:
+            return
+
+        data_size = len(channel) + len(data)
+        message = decode(data)
+        attributes = self.expand_message(message)
+
+        if channel not in self._latest_messages:
+            self._latest_messages[channel] = ChannelData(
+                channel=channel,
+                received=1,
+                initial_time=time_ns(),
+                total_data_size=data_size,
+                attributes=attributes,
+            )
+            self._df = pd.concat([
+                self._df,
+                pd.DataFrame(
+                    [[channel, 1, 1, truncate(data_size / 1_000)]],
+                    columns=COLUMNS,
                 ),
+            ])
+        else:
+            channel_data = self._latest_messages[channel]
+            channel_data.received += 1
+            channel_data.total_data_size += data_size
+            channel_data.attributes = attributes
+
+            self._df[self._df["Channel"] == channel] = [
+                channel,
+                channel_data.received,
+                truncate(
+                    channel_data.received
+                    / ((time_ns() - channel_data.initial_time) / 1e9)
+                ),
+                truncate(
+                    (channel_data.total_data_size / 1_000)
+                    / ((time_ns() - channel_data.initial_time) / 1e9)
+                ),
+            ]
+
+        self._table.update_from_pandas(self._df.reset_index(drop=True))
+        for idx in range(1, 4):
+            self._table.columns[idx]["sortable"] = True
+
+    def store_fingerprint_mappings(self, path: Path | None = None) -> None:
+        if path is None:
+            return
+
+        spec = importlib.util.spec_from_file_location(
+            path.stem, (path / "__init__.py").as_posix()
+        )
+
+        if spec is None or spec.loader is None:
+            return
+
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[path.stem] = module
+        spec.loader.exec_module(module)
+
+        for cls_member in inspect.getmembers(module, inspect.isclass):
+            get_packed_fingerprint = getattr(
+                cls_member[1], "_get_packed_fingerprint", None
             )
 
-    return attributes
+            if get_packed_fingerprint is None:
+                continue
 
-
-def receive_message(channel: str, data: bytes) -> None:
-    decode = _stored_fingerprints.get(data[:8])
-
-    if decode is None:
-        return
-
-    message = decode(data)
-    attributes = expand_message(message)
-
-    print(channel, attributes)
-
-
-def store_fingerprint_mappings(path: Path | None = None) -> None:
-    if path is None:
-        return
-
-    spec = importlib.util.spec_from_file_location(
-        path.stem, (path / "__init__.py").as_posix()
-    )
-
-    if spec is None or spec.loader is None:
-        return
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[path.stem] = module
-    spec.loader.exec_module(module)
-
-    for cls_member in inspect.getmembers(module, inspect.isclass):
-        get_packed_fingerprint = getattr(cls_member[1], "_get_packed_fingerprint", None)
-
-        if get_packed_fingerprint is None:
-            continue
-
-        _stored_fingerprints[get_packed_fingerprint()] = cls_member[1].decode
+            self._stored_fingerprints[get_packed_fingerprint()] = cls_member[1].decode
 
 
 def main() -> None:
-    arguments = create_argparser().parse_args()
-
-    store_fingerprint_mappings(arguments.generated_messages)
-
-    plc = Lcm().connect(arguments.lcm_url)
-    plc.subscribe(r".+", receive_message)
-
-    sleep(30)
+    ui.run(root=UI, reload=False, show_welcome_message=False)
 
 
-if __name__ in {"__main__", "__mp_main__"}:
+if __name__ == "__main__":
     main()

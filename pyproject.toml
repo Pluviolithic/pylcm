@@ -1,6 +1,6 @@
 [build-system]
 build-backend = "uv_build"
-requires = [ "uv-build>=0.10.7,<0.11" ]
+requires = [ "uv-build>=0.11.21,<0.12" ]
 
 [project]
 name = "plcm"
@@ -28,7 +28,10 @@ urls.Issues = "https://github.com/Pluviolithic/pylcm/issues"
 spy = "plcm.tools.spy:main"
 
 [project.optional-dependencies]
-ui = []
+ui = [
+    "nicegui>=3.13.0",
+    "pandas>=2.3.3",
+]
 
 [dependency-groups]
 dev = [
