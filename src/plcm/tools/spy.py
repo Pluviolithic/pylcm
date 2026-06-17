@@ -3,21 +3,27 @@ import inspect
 import sys
 from argparse import ArgumentParser
 from dataclasses import dataclass
-from math import trunc
 from pathlib import Path
+from threading import Lock
 from time import time_ns
 from typing import Any
 
-import pandas as pd
+from textual.app import App, ComposeResult
+from textual.containers import Center
+from textual.widgets import Button, DataTable
 
 from plcm import Lcm
 
-COLUMNS = ["Channel", "Received", "Rate (hz)", "Bandwidth (KB/s)"]
-
-try:
-    from nicegui import ui
-except ImportError:
-    raise RuntimeError("Optional ui dependencies not installed - ui will not run.")  # noqa: B904
+COLUMNS = (
+    "Channel",
+    "Type",
+    "Num Msgs",
+    "Hz",
+    "1/Hz",
+    "Jitter",
+    "Bandwidth",
+    "Undecodable",
+)
 
 
 @dataclass
@@ -26,16 +32,23 @@ class NestedAttributes:
 
 
 @dataclass
+class TemporaryChannelData:
+    data_size: int = 0
+    last_update_time: int = 0
+    last_message_time: int = 0
+    min_interval: int = 9999
+    max_interval: int = 0
+    last_received_count: int = 0
+
+
+@dataclass
 class ChannelData:
     channel: str
-    received: int
-    initial_time: int
-    total_data_size: int
-    attributes: list[tuple[str, Any]]
+    cls: Any
 
+    temporary_data: TemporaryChannelData
 
-def truncate(value: float) -> float:
-    return trunc(value * 100) / 100
+    received_count: int = 0
 
 
 def create_argparser() -> ArgumentParser:
@@ -66,21 +79,88 @@ def create_argparser() -> ArgumentParser:
     return argparser
 
 
-class UI:
+class UI(App):
     def __init__(self) -> None:
-        self._latest_messages = {}
-        self._stored_fingerprints = {}
-        self._df = pd.DataFrame(columns=COLUMNS)
-        self._table = ui.table.from_pandas(self._df.reset_index(drop=True))
+        super().__init__()
 
-        for idx in range(1, 4):
-            self._table.columns[idx]["sortable"] = True
+        self._table = None
+        self._channel_data_lock = Lock()
+        self._last_messages: dict[str, list[tuple[str, Any]]] = {}
+        self._channel_data: dict[str, ChannelData] = {}
+        self._stored_fingerprints = {}
 
         arguments = create_argparser().parse_args()
         self.store_fingerprint_mappings(arguments.generated_messages)
 
         plc = Lcm().connect(arguments.lcm_url)
         plc.subscribe(r".+", self.receive_message)
+
+    def compose(self) -> ComposeResult:
+        yield DataTable()
+        with Center():
+            yield Button("Clear", id="clear", flat=True, compact=True)
+
+    def on_mount(self) -> None:
+        table = self.query_one(DataTable)
+        table.add_columns(*[(column, column) for column in COLUMNS])
+        self.set_interval(1, self._update_table)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "clear":
+            table = self.query_one(DataTable)
+            with self._channel_data_lock:
+                for channel in self._channel_data:
+                    if channel in table.rows:
+                        table.remove_row(channel)
+
+                self._channel_data = {}
+
+    def _update_table(self) -> None:
+        table = self.query_one(DataTable)
+
+        with self._channel_data_lock:
+            for channel_data in self._channel_data.values():
+                current_time = time_ns()
+                received_since_last = (
+                    channel_data.received_count
+                    - channel_data.temporary_data.last_received_count
+                )
+                time_since_last = (
+                    current_time - channel_data.temporary_data.last_update_time
+                ) / 1e9
+                frequency = received_since_last / time_since_last
+                jitter = (
+                    channel_data.temporary_data.max_interval
+                    - channel_data.temporary_data.min_interval
+                ) / 1e6
+                bandwidth = (
+                    channel_data.temporary_data.data_size / time_since_last
+                ) / 1024
+
+                row = (
+                    channel_data.channel,
+                    channel_data.cls.__name__,
+                    channel_data.received_count,
+                    frequency,
+                    f"{(1_000 / frequency if frequency > 0 else float('inf')):6.2f} ms",
+                    f"{jitter:6.2f} ms",
+                    f"{bandwidth:6.2f} KB/s",
+                    0,
+                )
+
+                channel_data.temporary_data.min_interval = 1_000_000_000
+                channel_data.temporary_data.max_interval = 0
+                channel_data.temporary_data.last_received_count = (
+                    channel_data.received_count
+                )
+                channel_data.temporary_data.data_size = 0
+                channel_data.temporary_data.last_update_time = current_time
+
+                if channel_data.channel in table.rows:
+                    for idx in range(len(COLUMNS)):
+                        table.update_cell(channel_data.channel, COLUMNS[idx], row[idx])
+                else:
+                    table.add_row(*row, key=channel_data.channel)
 
     def expand_message(self, message: Any) -> list[tuple[str, Any]]:
         attributes = inspect.getmembers(message, lambda a: not inspect.isroutine(a))
@@ -104,49 +184,36 @@ class UI:
         decode = self._stored_fingerprints.get(data[:8])
 
         if decode is None:
+            # TODO: Add display capability for undecodable messages.
             return
 
         data_size = len(channel) + len(data)
         message = decode(data)
-        attributes = self.expand_message(message)
 
-        if channel not in self._latest_messages:
-            self._latest_messages[channel] = ChannelData(
-                channel=channel,
-                received=1,
-                initial_time=time_ns(),
-                total_data_size=data_size,
-                attributes=attributes,
+        self._last_messages[channel] = self.expand_message(message)
+
+        with self._channel_data_lock:
+            if channel not in self._channel_data:
+                self._channel_data[channel] = ChannelData(
+                    channel=channel,
+                    cls=message.__class__,  # TODO: Not yet utilized for anything.
+                    temporary_data=TemporaryChannelData(),
+                )
+
+            channel_data = self._channel_data[channel]
+
+            current_time = time_ns()
+            interval = current_time - channel_data.temporary_data.last_message_time
+            channel_data.temporary_data.min_interval = min(
+                channel_data.temporary_data.min_interval, interval
             )
-            self._df = pd.concat([
-                self._df,
-                pd.DataFrame(
-                    [[channel, 1, 1, truncate(data_size / 1_000)]],
-                    columns=COLUMNS,
-                ),
-            ])
-        else:
-            channel_data = self._latest_messages[channel]
-            channel_data.received += 1
-            channel_data.total_data_size += data_size
-            channel_data.attributes = attributes
+            channel_data.temporary_data.max_interval = max(
+                channel_data.temporary_data.max_interval, interval
+            )
+            channel_data.temporary_data.last_message_time = current_time
 
-            self._df[self._df["Channel"] == channel] = [
-                channel,
-                channel_data.received,
-                truncate(
-                    channel_data.received
-                    / ((time_ns() - channel_data.initial_time) / 1e9)
-                ),
-                truncate(
-                    (channel_data.total_data_size / 1_000)
-                    / ((time_ns() - channel_data.initial_time) / 1e9)
-                ),
-            ]
-
-        self._table.update_from_pandas(self._df.reset_index(drop=True))
-        for idx in range(1, 4):
-            self._table.columns[idx]["sortable"] = True
+            channel_data.received_count += 1
+            channel_data.temporary_data.data_size += data_size
 
     def store_fingerprint_mappings(self, path: Path | None = None) -> None:
         if path is None:
@@ -175,7 +242,8 @@ class UI:
 
 
 def main() -> None:
-    ui.run(root=UI, reload=False, show_welcome_message=False)
+    app = UI()
+    app.run()
 
 
 if __name__ == "__main__":

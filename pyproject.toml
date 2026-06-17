@@ -21,17 +21,12 @@ classifiers = [
 dependencies = [
     "typing-extensions>=4.15",
 ]
+optional-dependencies.ui = [
+    "textual>=8.2.7",
+]
 urls.Homepage = "https://github.com/Pluviolithic/pylcm"
 urls.Issues = "https://github.com/Pluviolithic/pylcm/issues"
-
-[project.scripts]
-spy = "plcm.tools.spy:main"
-
-[project.optional-dependencies]
-ui = [
-    "nicegui>=3.13.0",
-    "pandas>=2.3.3",
-]
+scripts.spy = "plcm.tools.spy:main"
 
 [dependency-groups]
 dev = [
